@@ -66,6 +66,12 @@ fun printChessBoard(boardSize: Byte,
     })
 }
 
+fun printlnWithLock(message: Any?) {
+    synchronized(printingLock, {
+        System.out.println(message)
+    })
+}
+
 private val printingLock = Any()
 
 private fun printWithoutLock(queenPositions: Collection<SquareId>, boardSize: Byte, attackedSquares: Collection<SquareId>) {

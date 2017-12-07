@@ -26,30 +26,37 @@ package us.csc.queens
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
-internal val VERSION = "0.5.0"
-private val PRINT_SOLUTIONS_THRESHOLD = REGULAR_CHESS_BOARD_SIZE
-
 private enum class ArgList(val cliArg: String) {
-    BOARD_SIZE("--board-size"),
-    NUM_THREADS("--num-threads"),
-    TRACE_STEPS("--trace-steps"),
-    PRINT_SOLUTIONS("--print-solutions"),
-    STOP_AFTER_FIRST("--stop-after-first");
+    CORES("--cores"),
+    HELP("--help"),
+    MODE("--mode"),
+    SIZE("--size"),
+    VERSION("--version");
 }
 
-private val USAGE: String = """* N-Queens, v. $VERSION
+private val USAGE: String = """* N-Queens, v. $NQUEENS_VERSION
 Usage:
-  --board-size <#>: specify the size of the board; must be >= 1; the default is 8.
-  --num-threads <#>: specify the number of threads; must be >= 1; the default is 1.
-  --trace-steps: print a trace of the algorithm step-by-step.  Off by default.
-  --print-solutions: print the solutions in addition to counting them.  Because
-    printing is slow, the solutions are only printed by default for size
-    ${PRINT_SOLUTIONS_THRESHOLD}x$PRINT_SOLUTIONS_THRESHOLD boards and smaller.
-  --stop-after-first: stop after the first solution is found; by default, the
-    program continues until all solutions are found.
+  --cores <#>: specify the number of CPU cores; must be >= 1; the default is 1 if not specified.
+  --help: prints this help message and exits.
+  --mode <MODE>: specify the program mode.  Choices for the MODE parameter include:
+    benchmark - Count the solutions along with time spent; used to measure CPU performance.
+    first - Print the first solution and exit; useful to see a solution of very large boards.
+    trace: print a trace of the algorithm step-by-step, as well as the solutions.
+    view: print all solutions of the N-Queen problem for the given board size.
+  --size <#>: specify the size of the board; must be >= 1; the default is 8.
+  --version: prints the version of the program and exits.
+
+Example:
+  > java -jar bin/n-queens-$NQUEENS_VERSION.jar --mode benchmark --size 14
+  Counts all solutions to the N-Queens problem for a 14x14 chess board.
 """
 
 fun main(args: Array<String>) {
+    if (args.isEmpty() || !args.contains(ArgList.MODE.cliArg)) {
+        println(USAGE)
+        return
+    }
+
     var boardSize: Byte = REGULAR_CHESS_BOARD_SIZE
     var numThreads = 1
     var traceSteps = false
@@ -58,26 +65,56 @@ fun main(args: Array<String>) {
 
     var argIndex = 0
     while (argIndex < args.size) {
-        val arg = args[argIndex]
+        val arg = args[argIndex].toLowerCase()
         when (arg) {
-            ArgList.BOARD_SIZE.cliArg -> try {
+            ArgList.SIZE.cliArg -> try {
                 boardSize = args[++argIndex].toByte()
             } catch (e: Throwable) {
                 println(USAGE)
                 return
             }
 
-            ArgList.NUM_THREADS.cliArg -> try {
+            ArgList.CORES.cliArg -> try {
                 numThreads = args[++argIndex].toInt()
             } catch (e: Throwable) {
                 println(USAGE)
                 return
             }
 
+            ArgList.MODE.cliArg -> try {
+                val mode = args[++argIndex].toLowerCase()
+                when (mode) {
+                    "benchmark" -> printSolutions = false
+                    "first" -> {
+                        stopAfterFirst = true
+                        printSolutions = true
+                    }
+                    "trace" -> {
+                        traceSteps = true
+                        printSolutions = true
+                    }
+                    "view" -> printSolutions = true
+                    else -> {
+                        println(USAGE)
+                        return
+                    }
+                }
+            } catch (e: Throwable) {
+                println(USAGE)
+                return
+            }
+
             else -> when (arg) {
-                ArgList.TRACE_STEPS.cliArg -> traceSteps = true
-                ArgList.PRINT_SOLUTIONS.cliArg -> printSolutions = true
-                ArgList.STOP_AFTER_FIRST.cliArg -> stopAfterFirst = true
+                ArgList.HELP.cliArg -> {
+                    println(USAGE)
+                    return
+                }
+
+                ArgList.VERSION.cliArg -> {
+                    println("N-Queens, v. $NQUEENS_VERSION")
+                    return
+                }
+
                 else -> {
                     println(USAGE)
                     return
@@ -87,7 +124,6 @@ fun main(args: Array<String>) {
         ++argIndex
     }
 
-    printSolutions = (printSolutions || boardSize <= PRINT_SOLUTIONS_THRESHOLD)
     runSolver(boardSize, numThreads, traceSteps, printSolutions, stopAfterFirst)
 }
 
@@ -100,15 +136,15 @@ private fun runSolver(boardSize: Byte,
                       traceSteps: Boolean,
                       printSolutions: Boolean,
                       stopAfterFirst: Boolean) {
-    val solver = Solver(boardSize, numThreads)
-
     println(getTimeDateString(LocalDateTime.now()))
-    println("Solving a ${solver.boardSize}x${solver.boardSize} board with $numThreads threads:")
+    println("Solving a ${boardSize}x${boardSize} board; # threads = $numThreads:")
 
-    var solverResult = Solver.Result()
+    var solverResult = SolveResult()
     run {
         val startTime: Long = System.nanoTime()
-        solverResult = solver.solve(
+        solverResult = solveNQ(
+            boardSize = boardSize,
+            numThreads = numThreads,
             printSteps = traceSteps,
             firstSolutionOnly = stopAfterFirst,
             collectSolutions = false,
@@ -120,7 +156,7 @@ private fun runSolver(boardSize: Byte,
         println("\nTime to solve: $durationStr [s]")
     }
 
-    println("Total solutions = ${solverResult.numSolutions}")
+    println("Total solutions found = ${solverResult.numSolutions}")
     println(getTimeDateString(LocalDateTime.now()))
 }
  

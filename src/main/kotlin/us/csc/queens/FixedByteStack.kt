@@ -66,7 +66,7 @@ class FixedByteStack(val capacity: Int) {
 
     fun pop(): Byte {
         val top = top()
-        --currentIndex;
+        --currentIndex
         return top
     }
 
@@ -80,7 +80,13 @@ class FixedByteStack(val capacity: Int) {
     }
 
     override fun hashCode(): Int {
-        return toArray().hashCode()
+        var hash: Int = Objects.hash(currentIndex)
+
+        for (i in 0..currentIndex) {
+            hash += Objects.hash(backingArray[i])
+        }
+
+        return hash
     }
 
     override fun equals(other: Any?): Boolean {
@@ -88,6 +94,16 @@ class FixedByteStack(val capacity: Int) {
             return false
         }
 
-        return (Arrays.equals(toArray(), other.toArray()))
+        if (other.size() != size()) {
+            return false
+        }
+
+        for (i in 0..currentIndex) {
+            if (other.backingArray[i] != backingArray[i]) {
+                return false
+            }
+        }
+
+        return true
     }
 }

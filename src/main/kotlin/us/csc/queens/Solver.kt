@@ -23,15 +23,142 @@
  */
 package us.csc.queens
 
-import com.google.common.util.concurrent.MoreExecutors.getExitingExecutorService
+import com.google.common.util.concurrent.MoreExecutors
 import java.util.*
-import java.util.concurrent.*
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.collections.ArrayList
 
 typealias SquareIdArray = ShortArray
 typealias Solution = SquareIdArray
 
+val NQUEENS_VERSION = "0.5.0"
 val EMPTY_SQUARE_ID_ARRAY = SquareIdArray(0)
+
+/** Return type of solveNQ.  Use combineResults to combine two instances. */
+data class SolveResult(val numSolutions: Long, val solutionList: List<Solution>) {
+    constructor(): this(0, ArrayList())
+
+    companion object {
+        fun combineResults(lhs: SolveResult, rhs: SolveResult): SolveResult {
+            val numSolutions: Long = (lhs.numSolutions + rhs.numSolutions)
+
+            val solutionList: List<Solution>
+            when {
+                numSolutions > 0 -> {
+                    solutionList = ArrayList(numSolutions.toInt())
+                    solutionList.addAll(lhs.solutionList)
+                    solutionList.addAll(rhs.solutionList)
+                }
+
+                else -> {
+                    solutionList  = Collections.emptyList()
+                }
+            }
+
+            return SolveResult(numSolutions, solutionList)
+        }
+    }
+}
+
+/**
+ * Solve the N-queens problem for the given board.
+ *
+ * This function can be called multiple times safely.
+ *
+ * @param boardSize Size of the chess board to solve for; must be >= 1.
+ * @param numThreads Number of threads to use, which must be >= 1.
+ * @param printSteps If true, print the steps; i.e., the intermediate
+ *  positions attained during the search.
+ * @param firstSolutionOnly If true, stop the search after a solution
+ *  has been found and verified.
+ * @param collectSolutions If true, collect the solutionList and return
+ *  them in a List in the order in which they were found.
+ * @param printSolutions If true, the board will be printed every time
+ *  a solution is discovered.  Only use for small board sizes.
+ * @return Number of solutions found, as well as a list of the solutions
+ *  if collectSolutions is true or an empty list otherwise.
+ */
+fun solveNQ(boardSize: Byte,
+            numThreads: Int,
+            printSteps: Boolean,
+            firstSolutionOnly: Boolean,
+            collectSolutions: Boolean,
+            printSolutions: Boolean): SolveResult
+{
+    if (firstSolutionOnly) {
+        return findFirstSolution(boardSize, printSteps)
+    }
+
+    val executorService: ExecutorService = when {
+        numThreads < 1 -> throw IllegalArgumentException("numThreads = $numThreads is invalid; must be >= 1")
+        numThreads == 1 -> MoreExecutors.newDirectExecutorService()
+        else -> {
+            val threadPoolSize = Math.min(boardSize.toInt(), numThreads)
+            Executors.newFixedThreadPool(threadPoolSize)
+        }
+    }
+
+    try {
+        return solveNQWithExecutor(
+            boardSize,
+            executorService,
+            printSteps,
+            collectSolutions,
+            printSolutions)
+    } finally {
+        executorService.shutdown()
+    }
+}
+
+private fun solveNQWithExecutor(boardSize: Byte,
+                                executorService: ExecutorService,
+                                printSteps: Boolean,
+                                collectSolutions: Boolean,
+                                printSolutions: Boolean): SolveResult {
+    val totalSolutionCount = AtomicLong(0)
+    val solverList: List<Solver> = List(boardSize.toInt(), { Solver(boardSize, totalSolutionCount) })
+
+    val futures = ArrayList<Future<SolveResult>>()
+    for (row in 0 until boardSize) {
+        val solver = solverList[row]
+        val future: Future<SolveResult> = executorService.submit(Callable<SolveResult> {
+            return@Callable solver.solveWithFirstQueenPlaced(
+                rankOfFirstQueen = row.toByte(),
+                printSteps = printSteps,
+                collectSolutions = collectSolutions,
+                printSolutions = printSolutions,
+                firstSolutionOnly = false)
+        })
+
+        futures.add(future)
+    }
+
+    var finalResult = SolveResult()
+    for (future in futures) {
+        finalResult = SolveResult.combineResults(finalResult, future.get())
+    }
+
+    return finalResult
+}
+
+private fun findFirstSolution(boardSize: Byte, printSteps: Boolean): SolveResult {
+    var row = 0
+    val totalSolutionCount = AtomicLong(0)
+    while (row < boardSize) {
+        val solver = Solver(boardSize, totalSolutionCount)
+        val solveResult = solver.solveWithFirstQueenPlaced(row.toByte(), printSteps, true, true, true)
+        if (solveResult.numSolutions > 0) {
+            return solveResult
+        }
+        ++row
+    }
+
+    return SolveResult()
+}
 
 /**
  * A stack-based backtracking solver for the N-Queens problem.
@@ -39,91 +166,21 @@ val EMPTY_SQUARE_ID_ARRAY = SquareIdArray(0)
  * The problem is described in detail here:
  * https://en.wikipedia.org/wiki/Eight_queens_puzzle.
  */
-class Solver(val boardSize: Byte, numThreads: Int = 1) {
-    private val executorService: ExecutorService
+private class Solver(boardSize: Byte, private var totalSolutionCount: AtomicLong) {
     private val board: Board = Board(boardSize)
     private val queenPositions = FixedByteStack(board.size.toInt())
 
-    init {
-        if (numThreads < 1) {
-            throw IllegalArgumentException("numThreads = $numThreads is invalid; must be >= 1")
-        }
-
-        @Suppress("NULLABILITY_MISMATCH_BASED_ON_JAVA_ANNOTATIONS")
-        executorService = getExitingExecutorService(
-            Executors.newFixedThreadPool(numThreads) as ThreadPoolExecutor?)
-    }
-
-    /** Return type of Solver.solve. */
-    data class Result(val numSolutions: Long, val solutionList: ArrayList<Solution>) {
-        constructor(): this(0, ArrayList())
-
-        companion object {
-            fun combineResults(lhs: Result, rhs: Result): Result {
-                val numSolutions: Long = (lhs.numSolutions + rhs.numSolutions)
-                val solutionList = lhs.solutionList
-                solutionList.addAll(rhs.solutionList)
-
-                return Result(numSolutions, solutionList)
-            }
-        }
-    }
-
     /**
-     * Solve the N-queens problem for the given board.
-     *
-     * This function can be called multiple times safely.
-     *
-     * @param printSteps If true, print the steps; i.e., the intermediate
-     *  positions attained during the search.
-     * @param firstSolutionOnly If true, stop the search after a solution
-     *  has been found and verified.
-     * @param collectSolutions If true, collect the solutionList and return
-     *  them in a List in the order in which they were found.
-     * @param printSolutions If true, the board will be printed every time
-     *  a solution is discovered.  Only use for small board sizes.
-     * @return Number of solutions found, as well as a list of the solutions
-     *  if collectSolutions is true or an empty list otherwise.
+     * @param rankOfFirstQueen The first queen (on the 'a' file) will appear on this rank.
      */
-    fun solve(
-        printSteps: Boolean,
-        firstSolutionOnly: Boolean,
-        collectSolutions: Boolean,
-        printSolutions: Boolean): Result
-    {
-        var finalResult = Result()
-
-        val futures = ArrayList<Future<Result>>()
-        for (row in 0 until boardSize) {
-            val future: Future<Result> = executorService.submit(Callable<Result> {
-                val rankOfFirstQueen = row.toByte()
-                return@Callable solveWithFirstQueenPlaced(
-                    rankOfFirstQueen,
-                    printSteps,
-                    collectSolutions,
-                    printSolutions,
-                    firstSolutionOnly)
-            })
-
-            futures.add(future)
-        }
-
-        for (future in futures) {
-            finalResult = Result.combineResults(finalResult, future.get())
-        }
-
-        return finalResult
-    }
-
-    private fun solveWithFirstQueenPlaced(rankOfFirstQueen: Byte,
-                                          printSteps: Boolean,
-                                          collectSolutions: Boolean,
-                                          printSolutions: Boolean,
-                                          firstSolutionOnly: Boolean): Result {
-        reset(printSteps)
+    fun solveWithFirstQueenPlaced(rankOfFirstQueen: Byte,
+                                  printSteps: Boolean,
+                                  collectSolutions: Boolean,
+                                  printSolutions: Boolean,
+                                  firstSolutionOnly: Boolean): SolveResult {
         addQueen(iFile = 0, iRank = rankOfFirstQueen, printSteps = printSteps)
         if (printSteps) {
-            printCurrentBoard(true)
+            printCurrentBoard(showAttackedSquares = true)
         }
 
         var numSolutions: Long = 0
@@ -132,16 +189,20 @@ class Solver(val boardSize: Byte, numThreads: Int = 1) {
             placeQueens(printSteps)
 
             // A solution has been found all files/columns are filled
-            val solutionFound = (queenPositions.size().toByte() == board.size)
+            val solutionFound = (board.size == queenPositions.size().toByte())
             if (solutionFound) {
                 ++numSolutions
                 if (collectSolutions) {
                     solutions.add(toSquareIds())
                 }
 
+
                 if (printSolutions) {
-                    print("\nSolution $numSolutions:")
-                    printCurrentBoard(false)
+                    synchronized(totalSolutionCount, {
+                        totalSolutionCount.getAndIncrement()
+                        println("Solution $totalSolutionCount:\n")
+                        printCurrentBoard(showAttackedSquares =  false)
+                    })
                 }
 
                 if (firstSolutionOnly) {
@@ -149,14 +210,13 @@ class Solver(val boardSize: Byte, numThreads: Int = 1) {
                 }
             }
 
-            // If the last queen is removed during backtracking, the stack will be empty.
             backtrack(printSteps)
             if (queenPositions.size() == 1) {
                 break
             }
         }
 
-        return Result(numSolutions, solutions)
+        return SolveResult(numSolutions, solutions)
     }
 
     /** Place queens on consecutive files until there's no more room to place more. */
@@ -203,14 +263,14 @@ class Solver(val boardSize: Byte, numThreads: Int = 1) {
 
     private fun addQueen(iFile: Byte, iRank: Byte, printSteps: Boolean) {
         if (printSteps) {
-            println("\nAdding queen to ${Square(iFile, iRank)}")
+            printlnWithLock("\nAdding queen to ${Square(iFile, iRank)}")
         }
 
         board.addQueen(iFile, iRank)
         queenPositions.push(iRank)
 
         if (printSteps) {
-            printCurrentBoard(true)
+            printCurrentBoard(showAttackedSquares =  true)
         }
     }
 
@@ -219,7 +279,7 @@ class Solver(val boardSize: Byte, numThreads: Int = 1) {
      */
     private fun removeLastQueen(iFile: Byte, iRank: Byte, printSteps: Boolean) {
         if (printSteps) {
-            println("\nRemoving queen from ${Square(iFile, iRank)}")
+            printlnWithLock("\nRemoving queen from ${Square(iFile, iRank)}")
         }
 
         // Calling removeQueenFast is safe here because the algorithm prevents
@@ -228,25 +288,17 @@ class Solver(val boardSize: Byte, numThreads: Int = 1) {
         queenPositions.pop()
 
         if (printSteps) {
-            printCurrentBoard(true)
+            printCurrentBoard(showAttackedSquares =  true)
         }
     }
 
-    private fun reset(printSteps: Boolean) {
-        board.clear()
-        queenPositions.clear()
-
-        if (printSteps) {
-            printCurrentBoard(true)
-        }
-    }
-
-    private fun printCurrentBoard(showAttackedSquares: Boolean) {
+    private fun printCurrentBoard(showAttackedSquares: Boolean = true) {
         val squaresWithQueens: SquareIdArray = toSquareIds()
         println()
         val attackedSquares: Collection<SquareId> =
             if (showAttackedSquares) board.getAttackedSquares() else Collections.emptyList()
         printChessBoard(board.size, attackedSquares, squaresWithQueens.toList())
+        println()
     }
 
     private fun toSquareIds(): SquareIdArray {

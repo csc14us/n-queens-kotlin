@@ -103,9 +103,16 @@ internal class Board(val size: Byte) {
 
         val col = iFile.toInt()
         val right: Int = toRightDiagonal(row, col)
-        val left: Int = toLeftDiagonal(row, col)
+        if (rightDiagonals[right]) {
+            return true
+        }
 
-        return (leftDiagonals[left] || rightDiagonals[right] || filesAttacked[col])
+        val left: Int = toLeftDiagonal(row, col)
+        if (leftDiagonals[left]) {
+            return true
+        }
+
+        return filesAttacked[col]
     }
 
     fun getAttackedSquares(): Collection<SquareId> {

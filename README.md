@@ -17,6 +17,7 @@ the impressive [Intel Core i7-4790K CPU @4GHz](https://ark.intel.com/products/80
 e.g.,
 
 ```
+> gradle build
 > java -jar bin\n-queens-0.5.0.jar --mode benchmark --size 15 --cores 1
 Solving a 15x15 board; # threads = 1:
 
@@ -48,6 +49,7 @@ for visualizing how the back-tracking algorithm works in practice.
 More details can be obtained with using `--help` in the command-line:
 
 ```
+> gradle build
 > java -jar bin\n-queens-0.5.0.jar --help
 * N-Queens, v. 0.5.0
 Usage:

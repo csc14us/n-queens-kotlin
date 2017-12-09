@@ -137,7 +137,7 @@ private fun runSolver(boardSize: Byte,
                       printSolutions: Boolean,
                       stopAfterFirst: Boolean) {
     println(getTimeDateString(LocalDateTime.now()))
-    println("Solving a ${boardSize}x${boardSize} board; # threads = $numThreads:")
+    println("Solving a ${boardSize}x${boardSize} board; # threads = $numThreads:\n")
 
     var solverResult = SolveResult()
     run {

@@ -24,6 +24,7 @@
 package us.csc.queens
 
 import com.google.common.util.concurrent.MoreExecutors
+import java.lang.Math.min
 import java.util.*
 import java.util.concurrent.Callable
 import java.util.concurrent.ExecutorService
@@ -35,7 +36,7 @@ import kotlin.collections.ArrayList
 typealias SquareIdArray = ShortArray
 typealias Solution = SquareIdArray
 
-val NQUEENS_VERSION = "0.5.0"
+val NQUEENS_VERSION = "0.8.0"
 val EMPTY_SQUARE_ID_ARRAY = SquareIdArray(0)
 
 /** Return type of solveNQ.  Use combineResults to combine two instances. */
@@ -55,7 +56,7 @@ data class SolveResult(val numSolutions: Long, val solutionList: List<Solution>)
                 }
 
                 else -> {
-                    solutionList  = Collections.emptyList()
+                    solutionList = Collections.emptyList()
                 }
             }
 
@@ -97,7 +98,8 @@ fun solveNQ(boardSize: Byte,
         numThreads < 1 -> throw IllegalArgumentException("numThreads = $numThreads is invalid; must be >= 1")
         numThreads == 1 -> MoreExecutors.newDirectExecutorService()
         else -> {
-            val threadPoolSize = Math.min(boardSize.toInt(), numThreads)
+            val availableProcessors = Runtime.getRuntime().availableProcessors()
+            val threadPoolSize = min(min(boardSize.toInt(), availableProcessors), numThreads)
             Executors.newFixedThreadPool(threadPoolSize)
         }
     }
@@ -110,7 +112,7 @@ fun solveNQ(boardSize: Byte,
             collectSolutions,
             printSolutions)
     } finally {
-        executorService.shutdown()
+        executorService.shutdownNow()
     }
 }
 
@@ -123,8 +125,7 @@ private fun solveNQWithExecutor(boardSize: Byte,
     val solverList: List<Solver> = List(boardSize.toInt(), { Solver(boardSize, totalSolutionCount) })
 
     val futures = ArrayList<Future<SolveResult>>()
-    for (row in 0 until boardSize) {
-        val solver = solverList[row]
+    for ((row, solver) in solverList.withIndex()) {
         val future: Future<SolveResult> = executorService.submit(Callable<SolveResult> {
             return@Callable solver.solveWithFirstQueenPlaced(
                 rankOfFirstQueen = row.toByte(),
@@ -137,9 +138,13 @@ private fun solveNQWithExecutor(boardSize: Byte,
         futures.add(future)
     }
 
+    val startTimeMS = System.currentTimeMillis()
     var finalResult = SolveResult()
-    for (future in futures) {
-        finalResult = SolveResult.combineResults(finalResult, future.get())
+    for ((index, future) in futures.withIndex()) {
+        val solveResult = future.get()
+        finalResult = SolveResult.combineResults(finalResult, solveResult)
+        val timeInSecs: Double = (System.currentTimeMillis() - startTimeMS) / 1000.0
+        println("Task ${index+1} finished in $timeInSecs [s]; found ${solveResult.numSolutions} queens.")
     }
 
     return finalResult
@@ -166,7 +171,7 @@ private fun findFirstSolution(boardSize: Byte, printSteps: Boolean): SolveResult
  * The problem is described in detail here:
  * https://en.wikipedia.org/wiki/Eight_queens_puzzle.
  */
-private class Solver(boardSize: Byte, private var totalSolutionCount: AtomicLong) {
+class Solver(boardSize: Byte, private var totalSolutionCount: AtomicLong) {
     private val board: Board = Board(boardSize)
     private val queenPositions = FixedByteStack(board.size.toInt())
 
@@ -196,11 +201,9 @@ private class Solver(boardSize: Byte, private var totalSolutionCount: AtomicLong
                     solutions.add(toSquareIds())
                 }
 
-
                 if (printSolutions) {
                     synchronized(totalSolutionCount, {
-                        totalSolutionCount.getAndIncrement()
-                        println("Solution $totalSolutionCount:\n")
+                        println("Solution ${totalSolutionCount.incrementAndGet()}:")
                         printCurrentBoard(showAttackedSquares =  false)
                     })
                 }
@@ -294,7 +297,6 @@ private class Solver(boardSize: Byte, private var totalSolutionCount: AtomicLong
 
     private fun printCurrentBoard(showAttackedSquares: Boolean = true) {
         val squaresWithQueens: SquareIdArray = toSquareIds()
-        println()
         val attackedSquares: Collection<SquareId> =
             if (showAttackedSquares) board.getAttackedSquares() else Collections.emptyList()
         printChessBoard(board.size, attackedSquares, squaresWithQueens.toList())

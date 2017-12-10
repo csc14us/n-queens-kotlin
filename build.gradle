@@ -1,5 +1,5 @@
 group 'us.csc'
-version '0.5.0'
+version '0.8.0'
 
 task wrapper(type: Wrapper) {
     gradleVersion = '4.3.1'
